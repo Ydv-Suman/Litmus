@@ -26,6 +26,7 @@ if config.config_file_name is not None:
 # Import models so SQLAlchemy metadata includes every table for autogenerate.
 from database import Base
 from models.applications_received import ApplicationReceived
+from models.hr_user import HrUser
 from models.job_listing import JobListing
 
 target_metadata = Base.metadata

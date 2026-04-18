@@ -46,4 +46,24 @@ export function getJobs() {
   return apiRequest('/jobs')
 }
 
+export function signupHrUser(payload) {
+  return apiRequest('/hr/signup', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function loginHrUser(payload) {
+  return apiRequest('/hr/login', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
 export { apiRequest, API_BASE_URL }

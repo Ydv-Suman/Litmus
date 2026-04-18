@@ -17,7 +17,7 @@ const entryPoints = [
     title: 'Manage hiring',
     description:
       'Review applicants, coordinate hiring activity, and keep recruiting work organized.',
-    href: '/hr',
+    href: '/hr/login',
     cta: 'Open HR area',
     surfaceClass:
       'border-sky-200/70 bg-white/70 from-sky-200 via-cyan-50 to-white text-slate-900 shadow-[0_28px_70px_rgba(60,110,150,0.18)]',

@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 *.pyo
+__init__.py
 
 # Virtual env
 .venv/

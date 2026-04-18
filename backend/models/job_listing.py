@@ -1,4 +1,5 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, JSON, String, Text, func
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, JSON, String, Text, func
+from sqlalchemy.orm import relationship
 
 from database import Base
 
@@ -14,6 +15,7 @@ class JobListing(Base):
     department = Column(String(100), nullable=False)
     location = Column(String(255), nullable=True)
     job_type = Column(String(50), nullable=False)
+    hr_user_id = Column(Integer, ForeignKey("hr_users.id"), nullable=True, index=True)
     is_active = Column(Boolean, nullable=False, default=True, server_default="true")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(
@@ -23,3 +25,6 @@ class JobListing(Base):
         onupdate=func.now(),
     )
     is_deleted = Column(Boolean, nullable=False, default=False, server_default="false")
+
+    hr_user = relationship("HrUser", back_populates="job_listings")
+    applications = relationship("ApplicationReceived", back_populates="job_listing")
