@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import Field from '../components/Field'
 import { loginHrUser } from '../services/api'
@@ -10,6 +10,7 @@ const initialFormData = {
 }
 
 function HrLoginPage() {
+  const navigate = useNavigate()
   const [formData, setFormData] = useState(initialFormData)
   const [requestState, setRequestState] = useState({
     status: 'idle',
@@ -34,7 +35,12 @@ function HrLoginPage() {
 
     try {
       const response = await loginHrUser(formData)
-      setLoggedInUser(response.user || null)
+      const user = response.user || null
+      setLoggedInUser(user)
+      if (user) {
+        localStorage.setItem('hr_user', JSON.stringify(user))
+        navigate('/hr/dashboard')
+      }
       setRequestState({
         status: 'success',
         message: response.message || 'Login successful.',

@@ -50,6 +50,14 @@ export function getAssessment(token) {
   return apiRequest(`/assessment/${encodeURIComponent(token)}`)
 }
 
+export function submitAssessmentAnswers(token, answers) {
+  return apiRequest(`/assessment/${encodeURIComponent(token)}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ answers }),
+  })
+}
+
 export function signupHrUser(payload) {
   return apiRequest('/hr/signup', {
     method: 'POST',
@@ -68,6 +76,10 @@ export function loginHrUser(payload) {
     },
     body: JSON.stringify(payload),
   })
+}
+
+export function getHrApplications(userId) {
+  return apiRequest(`/hr/${userId}/applications`)
 }
 
 export { apiRequest, API_BASE_URL }

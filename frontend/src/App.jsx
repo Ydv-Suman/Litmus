@@ -4,6 +4,7 @@ import ApplyPage from './pages/ApplyPage'
 import HomePage from './pages/HomePage'
 import HrLoginPage from './pages/HrLoginPage'
 import HrSignupPage from './pages/HrSignupPage'
+import HrDashboardPage from './pages/HrDashboardPage'
 import AssessmentPage from './pages/AssessmentPage'
 
 function App() {
@@ -15,6 +16,7 @@ function App() {
       <Route path="/hr" element={<Navigate to="/hr/login" replace />} />
       <Route path="/hr/login" element={<HrLoginPage />} />
       <Route path="/hr/signup" element={<HrSignupPage />} />
+      <Route path="/hr/dashboard" element={<HrDashboardPage />} />
     </Routes>
   )
 }

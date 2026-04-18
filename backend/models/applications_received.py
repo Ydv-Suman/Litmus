@@ -33,5 +33,7 @@ class ApplicationReceived(Base):
     assessment_token = Column(String(96), nullable=True, unique=True, index=True)
     assessment_payload = Column(JSON, nullable=True)
     assessment_sent_at = Column(DateTime(timezone=True), nullable=True)
+    assessment_score = Column(Float, nullable=True)
+    assessment_submitted_at = Column(DateTime(timezone=True), nullable=True)
 
     job_listing = relationship("JobListing", back_populates="applications")
