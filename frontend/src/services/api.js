@@ -46,6 +46,10 @@ export function getJobs() {
   return apiRequest('/jobs')
 }
 
+export function getAssessment(token) {
+  return apiRequest(`/assessment/${encodeURIComponent(token)}`)
+}
+
 export function signupHrUser(payload) {
   return apiRequest('/hr/signup', {
     method: 'POST',
