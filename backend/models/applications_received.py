@@ -8,11 +8,11 @@ class ApplicationReceived(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     full_name = Column(String(255), nullable=False)
-    email = Column(String(255), nullable=False, index=True)
-    phone = Column(String(20), nullable=False)
+    email = Column(String(255), nullable=False, index=True, unique=True)
+    phone = Column(String(20), nullable=False, unique=True)
     resume_file_name = Column(String(255), nullable=False)
     github_url = Column(String(255), nullable=True)
-    linkedin_url = Column(String(255), nullable=True)
+    linkedin_url = Column(String(255), nullable=False, unique=True)
     status = Column(String(50), nullable=False, default="submitted", server_default="submitted")
     created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
     updated_at = Column(

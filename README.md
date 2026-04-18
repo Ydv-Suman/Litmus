@@ -2,6 +2,17 @@
 
 Litmus is split into a FastAPI backend in `backend/` and a Vite + React frontend in `frontend/`.
 
+## Security Rules
+
+These rules are mandatory for all backend and frontend changes:
+
+- Never hardcode secrets, API keys, access tokens, passwords, database URLs, or cloud credentials in source files, tests, commits, or examples.
+- Load sensitive values only from environment variables or approved secret-management systems.
+- Reject or sanitize all user-controlled input before using it in database queries, file paths, HTML rendering, or external service calls.
+- Do not trust uploaded filenames, MIME types, or extensions alone for security-sensitive flows.
+- Do not log secrets, authentication tokens, personal data, or raw resume contents.
+- Any code that weakens authentication, authorization, input validation, file upload restrictions, or secret handling must be blocked until reviewed and fixed.
+
 ## Project Structure
 
 - `backend/main.py`: FastAPI app entrypoint

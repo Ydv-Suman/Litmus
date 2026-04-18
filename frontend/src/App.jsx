@@ -1,13 +1,16 @@
-import { useState } from 'react'
-import './App.css'
+import { Route, Routes } from 'react-router-dom'
+
+import ApplyPage from './pages/ApplyPage'
+import HomePage from './pages/HomePage'
+import HrPage from './pages/HrPage'
 
 function App() {
-  const [count, setCount] = useState(0)
-
   return (
-    <>
-      <div>This is frontend for Litmus</div>
-    </>
+    <Routes>
+      <Route path="/" element={<HomePage />} />
+      <Route path="/apply" element={<ApplyPage />} />
+      <Route path="/hr" element={<HrPage />} />
+    </Routes>
   )
 }
 
