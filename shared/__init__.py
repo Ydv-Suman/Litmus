@@ -1,0 +1,2 @@
+"""Litmus shared schema package."""
+

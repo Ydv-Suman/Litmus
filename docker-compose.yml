@@ -1,0 +1,86 @@
+version: "3.9"
+
+services:
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: services/gateway/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8000:8000"
+    depends_on:
+      - ingestion
+      - scoring
+
+  ingestion:
+    build:
+      context: .
+      dockerfile: services/ingestion/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8001:8001"
+    depends_on:
+      - redis
+
+  job_match:
+    build:
+      context: .
+      dockerfile: services/job_match/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8002:8002"
+    depends_on:
+      - redis
+
+  verification:
+    build:
+      context: .
+      dockerfile: services/verification/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8003:8003"
+    depends_on:
+      - redis
+
+  assessment:
+    build:
+      context: .
+      dockerfile: services/assessment/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8004:8004"
+    depends_on:
+      - redis
+
+  fairness:
+    build:
+      context: .
+      dockerfile: services/fairness/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8005:8005"
+    depends_on:
+      - redis
+
+  scoring:
+    build:
+      context: .
+      dockerfile: services/scoring/Dockerfile
+    env_file:
+      - .env
+    ports:
+      - "8006:8006"
+    depends_on:
+      - redis
+

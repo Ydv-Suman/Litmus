@@ -347,10 +347,11 @@ Each service exposes auto-generated Swagger docs:
 |---|---|
 | Gateway | http://localhost:8000/docs |
 | Ingestion | http://localhost:8001/docs |
-| Verification | http://localhost:8002/docs |
-| Job Match | http://localhost:8003/docs |
+| Job Match | http://localhost:8002/docs |
+| Verification | http://localhost:8003/docs |
 | Assessment | http://localhost:8004/docs |
-| Scoring | http://localhost:8005/docs |
+| Fairness | http://localhost:8005/docs |
+| Scoring | http://localhost:8006/docs |
 
 ---
 
