@@ -265,6 +265,12 @@ def list_hr_applications(user_id: int, db: Session = Depends(get_db)):
                 "department": job.department,
             },
             "submitted_at": application.created_at,
+            "screening_passed": application.screening_passed,
+            "pipeline_total": application.pipeline_total,
+            "pipeline_max": application.pipeline_max,
+            "assessment_sent_at": application.assessment_sent_at,
+            "assessment_score": application.assessment_score,
+            "assessment_submitted_at": application.assessment_submitted_at,
         }
         for application, job in applications
     ]
