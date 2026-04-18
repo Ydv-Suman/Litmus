@@ -123,6 +123,53 @@ def upload_file_to_s3(
     }
 
 
+def get_presigned_url(s3_key: str, expires_in: int = 3600) -> str:
+    """Return a time-limited presigned URL so the caller can read/download the object."""
+    if not s3_key:
+        raise HTTPException(status_code=400, detail="S3 key is required.")
+
+    s3_client = get_s3_client()
+    try:
+        url = s3_client.generate_presigned_url(
+            "get_object",
+            Params={"Bucket": S3_BUCKET_NAME, "Key": s3_key},
+            ExpiresIn=expires_in,
+        )
+    except (BotoCoreError, ClientError) as exc:
+        logger.exception("Failed to generate presigned URL for key %s.", s3_key)
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate file access URL.",
+        ) from exc
+    return url
+
+
+def download_file_from_s3(s3_key: str) -> bytes:
+    """Download an S3 object and return its raw bytes for server-side processing."""
+    if not s3_key:
+        raise HTTPException(status_code=400, detail="S3 key is required.")
+
+    s3_client = get_s3_client()
+    try:
+        response = s3_client.get_object(Bucket=S3_BUCKET_NAME, Key=s3_key)
+        return response["Body"].read()
+    except ClientError as exc:
+        error_code = exc.response.get("Error", {}).get("Code", "UnknownClientError")
+        if error_code == "NoSuchKey":
+            raise HTTPException(status_code=404, detail="File not found in S3.") from exc
+        logger.exception("S3 download failed for key %s.", s3_key)
+        raise HTTPException(
+            status_code=500,
+            detail=f"S3 download failed: {error_code}.",
+        ) from exc
+    except (BotoCoreError, OSError) as exc:
+        logger.exception("S3 download failed for key %s.", s3_key)
+        raise HTTPException(
+            status_code=500,
+            detail=f"S3 download failed: {exc.__class__.__name__}.",
+        ) from exc
+
+
 def delete_file_from_s3(s3_key: str) -> None:
     if not s3_key:
         return
