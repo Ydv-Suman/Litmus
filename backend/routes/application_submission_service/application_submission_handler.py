@@ -18,6 +18,7 @@ from service.github_analyser import analyze_github_profile
 from service.assessment_generator import generate_technical_assessment
 from service.email_notify import send_html_email
 from service.pipeline_screening import compute_pipeline_screening
+from service.linkedin_scraper import analyze_linkedin_profile
 from service.resume_parser import structure_resume_from_pdf_bytes
 from service.resume_reality_match import compute_resume_reality_match
 
@@ -112,6 +113,21 @@ def _build_assessment_email_html(public_name: str, assessment_url: str, job_titl
 </body></html>"""
 
 
+def get_active_job_or_404(db: Session, job_id: int) -> JobListing:
+    job = (
+        db.query(JobListing)
+        .filter(
+            JobListing.id == job_id,
+            JobListing.is_active.is_(True),
+            JobListing.is_deleted.is_(False),
+        )
+        .first()
+    )
+    if job is None:
+        raise HTTPException(status_code=404, detail="The selected job opening is invalid.")
+    return job
+
+
 @router.post("")
 def submit_application(
     full_name: str = Form(...),
@@ -137,11 +153,12 @@ def submit_application(
     cleaned_email = require_text(email, "Email").lower()
     cleaned_phone = require_text(phone, "Phone")
     cleaned_github_url = normalize_optional_url(github_url)
-    cleaned_linkedin = (
+    cleaned_linkedin_url = (
         normalize_url(require_text(linkedin_url, "LinkedIn URL"))
         if linkedin_url and linkedin_url.strip()
         else None
     )
+    job = get_active_job_or_404(db, job_id)
 
     resume_parsed: dict[str, Any] | None = None
     resume_parse_error: str | None = None
@@ -151,12 +168,9 @@ def submit_application(
         resume_parse_error = str(exc)
         logger.exception("Resume LLM parsing failed; application will still be stored.")
 
-    job = db.query(JobListing).filter(JobListing.id == job_id).first()
     reality_match: dict[str, Any] | None = None
     reality_match_error: str | None = None
-    if not job:
-        reality_match_error = "Job listing is missing or inactive."
-    elif resume_parsed:
+    if resume_parsed:
         try:
             reality_match = compute_resume_reality_match(job, resume_parsed)
         except Exception as exc:
@@ -178,7 +192,22 @@ def submit_application(
             logger.exception("GitHub credibility scoring failed.")
     else:
         github_analysis_error = "Skipped because no GitHub URL was provided."
-    screening = compute_pipeline_screening(reality_match, cleaned_linkedin)
+    screening = compute_pipeline_screening(reality_match, cleaned_linkedin_url)
+
+    linkedin_analysis: dict[str, Any] | None = None
+    linkedin_analysis_error: str | None = None
+    if cleaned_linkedin_url:
+        try:
+            linkedin_analysis = analyze_linkedin_profile(
+                cleaned_linkedin_url,
+                resume_data=resume_parsed,
+                job=job,
+            )
+        except Exception as exc:
+            linkedin_analysis_error = str(exc)
+            logger.exception("LinkedIn credibility scoring failed.")
+    else:
+        linkedin_analysis_error = "Skipped because no LinkedIn URL was provided."
 
     uploaded_resume = upload_file_to_s3(
         BytesIO(resume_bytes),
@@ -213,7 +242,7 @@ def submit_application(
         phone=cleaned_phone,
         resume_file_name=uploaded_resume["key"],
         github_url=cleaned_github_url,
-        linkedin_url=cleaned_linkedin,
+        linkedin_url=cleaned_linkedin_url,
         job_id=job_id,
         pipeline_resume_points=screening["pipeline_resume_points"],
         pipeline_linkedin_points=screening["pipeline_linkedin_points"],
@@ -266,6 +295,8 @@ def submit_application(
         "github_analysis": github_analysis,
         "github_analysis_error": github_analysis_error,
         "pipeline_screening": screening,
+        "linkedin_analysis": linkedin_analysis,
+        "linkedin_analysis_error": linkedin_analysis_error,
     }
 
     if not passed_screening:

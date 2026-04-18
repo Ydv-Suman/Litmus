@@ -1,0 +1,45 @@
+{
+  "samarpankoirala": {
+    "full_name": "Samarpan Koirala",
+    "headline": "Computer Science Student at ULM | Full-Stack & Backend Engineer | React, Node.js, Go, PostgreSQL",
+    "location": "Monroe, LA",
+    "current_title": "Full-Stack / Backend Engineer",
+    "skills": [
+      { "name": "react", "endorsements": 12 },
+      { "name": "node.js", "endorsements": 11 },
+      { "name": "express.js", "endorsements": 9 },
+      { "name": "javascript", "endorsements": 10 },
+      { "name": "python", "endorsements": 8 },
+      { "name": "golang", "endorsements": 7 },
+      { "name": "postgresql", "endorsements": 8 },
+      { "name": "mongodb", "endorsements": 6 },
+      { "name": "docker", "endorsements": 6 },
+      { "name": "kubernetes", "endorsements": 5 },
+      { "name": "git", "endorsements": 7 },
+      { "name": "github", "endorsements": 6 }
+    ],
+    "experiences": [
+      {
+        "title": "Full-Stack Engineer",
+        "company": "Independent Projects",
+        "start_date": "Jan 2024",
+        "end_date": "Present",
+        "duration_months": 28
+      },
+      {
+        "title": "Supplemental Instruction Leader",
+        "company": "University of Louisiana at Monroe",
+        "start_date": "Aug 2024",
+        "end_date": "Dec 2024",
+        "duration_months": 4
+      },
+      {
+        "title": "Computer Science Student",
+        "company": "University of Louisiana at Monroe",
+        "start_date": "Aug 2023",
+        "end_date": "Present",
+        "duration_months": 32
+      }
+    ]
+  }
+}
