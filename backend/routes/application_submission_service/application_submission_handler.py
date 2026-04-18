@@ -11,6 +11,7 @@ from database import SessionLocal
 from models.applications_received import ApplicationReceived
 from models.job_listing import JobListing
 from s3_config.s3_helper import delete_file_from_s3, upload_file_to_s3
+from service.github_analyser import analyze_github_profile
 from service.resume_parser import structure_resume_from_pdf_bytes
 from service.resume_reality_match import compute_resume_reality_match
 
@@ -40,6 +41,13 @@ def require_text(value: str, field_name: str) -> str:
 
 def normalize_url(value: str) -> str:
     return value.strip().rstrip("/").lower()
+
+
+def normalize_optional_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip().rstrip("/")
+    return cleaned or None
 
 
 def validate_resume_file(resume: UploadFile) -> str:
@@ -108,6 +116,7 @@ def submit_application(
     cleaned_email = require_text(email, "Email").lower()
     cleaned_phone = require_text(phone, "Phone")
     cleaned_linkedin_url = normalize_url(require_text(linkedin_url, "LinkedIn URL"))
+    cleaned_github_url = normalize_optional_url(github_url)
 
     resume_parsed: dict[str, Any] | None = None
     resume_parse_error: str | None = None
@@ -131,6 +140,20 @@ def submit_application(
     else:
         reality_match_error = "Skipped until resume is parsed successfully."
 
+    github_analysis: dict[str, Any] | None = None
+    github_analysis_error: str | None = None
+    if cleaned_github_url:
+        try:
+            github_analysis = analyze_github_profile(
+                cleaned_github_url,
+                resume_data=resume_parsed,
+            )
+        except Exception as exc:
+            github_analysis_error = str(exc)
+            logger.exception("GitHub credibility scoring failed.")
+    else:
+        github_analysis_error = "Skipped because no GitHub URL was provided."
+
     uploaded_resume = upload_file_to_s3(
         BytesIO(resume_bytes),
         file_name=resume_file_name,
@@ -143,7 +166,7 @@ def submit_application(
         email=cleaned_email,
         phone=cleaned_phone,
         resume_file_name=uploaded_resume["key"],
-        github_url=github_url.strip() if github_url else None,
+        github_url=cleaned_github_url,
         linkedin_url=cleaned_linkedin_url,
         job_id=job_id,
     )
@@ -176,4 +199,6 @@ def submit_application(
         "resume_parse_error": resume_parse_error,
         "resume_vs_reality": reality_match,
         "resume_vs_reality_error": reality_match_error,
+        "github_analysis": github_analysis,
+        "github_analysis_error": github_analysis_error,
     }
