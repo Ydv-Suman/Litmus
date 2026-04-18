@@ -82,4 +82,8 @@ export function getHrApplications(userId) {
   return apiRequest(`/hr/${userId}/applications`)
 }
 
+export function getHrApplicationDetail(userId, applicationId) {
+  return apiRequest(`/hr/${userId}/applications/${applicationId}`)
+}
+
 export { apiRequest, API_BASE_URL }

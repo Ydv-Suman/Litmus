@@ -124,12 +124,14 @@ def analyze_linkedin_profile(
     normalized_url = _normalize_linkedin_url(linkedin_url)
     mock_profile = _mock_profile_for_url(normalized_url)
     if mock_profile is not None:
-        return _build_analysis_result(
+        result = _build_analysis_result(
             linkedin_url=normalized_url,
             merged_profile=mock_profile,
             resume_data=resume_data,
             job=job,
         )
+        result["data_source"] = "mock"
+        return result
 
     try:
         outx_profile = _fetch_profile_via_outx(normalized_url)

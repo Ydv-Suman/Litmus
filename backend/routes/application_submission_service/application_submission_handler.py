@@ -253,6 +253,9 @@ def submit_application(
         assessment_payload=assessment_payload,
         assessment_sent_at=None,
         status="assessment_invited" if passed_screening and assessment_token else "screening_failed",
+        resume_detail={"parsed": resume_parsed, "reality_match": reality_match},
+        github_detail=github_analysis,
+        linkedin_detail={"analysis": linkedin_analysis, "screening": screening.get("linkedin_detail")},
     )
 
     try:

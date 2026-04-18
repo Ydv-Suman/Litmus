@@ -35,5 +35,9 @@ class ApplicationReceived(Base):
     assessment_sent_at = Column(DateTime(timezone=True), nullable=True)
     assessment_score = Column(Float, nullable=True)
     assessment_submitted_at = Column(DateTime(timezone=True), nullable=True)
+    assessment_answers = Column(JSON, nullable=True)
+    resume_detail = Column(JSON, nullable=True)
+    github_detail = Column(JSON, nullable=True)
+    linkedin_detail = Column(JSON, nullable=True)
 
     job_listing = relationship("JobListing", back_populates="applications")
