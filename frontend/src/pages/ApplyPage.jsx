@@ -166,7 +166,9 @@ function ApplyPage() {
 
       setSubmissionState({
         status: 'success',
-        message: response.message || 'Application submitted successfully.',
+        message: response.assessment_url
+          ? `${response.message || 'Application submitted successfully.'} Open your assessment at ${response.assessment_url}`
+          : response.message || 'Application submitted successfully.',
       })
       setFormData(initialFormData)
     } catch (error) {
