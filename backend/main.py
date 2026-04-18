@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from routes.application_submission_service import application_submission_handler
+from routes.hr_auth_service import hr_auth_handler
 from routes.job_listing_service import job_listing_handler
 
 
@@ -30,4 +31,5 @@ app.add_middleware(
 def check_health():
     return {"Message": "Backend is running!!!!"}
 app.include_router(application_submission_handler.router)
+app.include_router(hr_auth_handler.router)
 app.include_router(job_listing_handler.router)

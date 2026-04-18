@@ -1,4 +1,5 @@
 from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy.orm import relationship
 
 from database import Base
 
@@ -23,3 +24,5 @@ class ApplicationReceived(Base):
     )
     is_deleted = Column(Boolean, nullable=False, default=False, server_default="false")
     job_id = Column(Integer, ForeignKey("job_listings.id"), nullable=False, index=True)
+
+    job_listing = relationship("JobListing", back_populates="applications")
