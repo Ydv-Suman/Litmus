@@ -1,11 +1,14 @@
 """
 Extract structured fields from a resume PDF.
 
-Uses pypdf when installed (recommended: pip install pypdf). Falls back to a
-lightweight literal-string scrape from the PDF bytes when pypdf is missing.
+Uses pypdf for text extraction. The LLM / structured path requires pypdf
+(listed in requirements.txt). The heuristic parse_resume_pdf path can still use
+a regex fallback when pypdf is missing.
 
-LLM structured extraction: set GROQ_API_KEY (Groq OpenAI-compatible API) or
-OPENAI_API_KEY. Optional: LLM_BASE_URL, LLM_MODEL (defaults chosen per provider).
+LLM extraction uses Groq only (official groq Python SDK; pip install groq).
+Set GROQ_API_KEY in backend/.env (loaded automatically).
+Optional: GROQ_BASE_URL (host only, e.g. https://api.groq.com — do not append /openai/v1; the SDK adds it),
+GROQ_MODEL or LLM_MODEL.
 
 Primary API: structure_resume_from_pdf_bytes(pdf_bytes) → structured dict.
 """
@@ -15,11 +18,15 @@ from __future__ import annotations
 import json
 import os
 import re
-import urllib.error
-import urllib.request
+import unicodedata
 from io import BytesIO
 from pathlib import Path
 from typing import Any, BinaryIO
+
+from dotenv import load_dotenv
+
+# Load backend/.env even when the process cwd is not the backend directory (e.g. uvicorn from repo root).
+load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 # --- PDF text extraction -------------------------------------------------
 
@@ -101,6 +108,36 @@ def pdf_to_text(data: bytes) -> str:
     if text is not None:
         return text
     return _extract_text_fallback(data)
+
+
+def _sanitize_extracted_text(text: str) -> str:
+    """Drop PDF/binary control noise; keep normal text and newlines."""
+    text = unicodedata.normalize("NFC", text)
+    out: list[str] = []
+    for ch in text:
+        o = ord(ch)
+        if ch in "\n\r\t":
+            out.append(ch)
+        elif o < 32 or o == 0x7F:
+            continue
+        else:
+            out.append(ch)
+    s = "".join(out)
+    s = re.sub(r"[ \t\f\v]+", " ", s)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+
+def _is_plausible_resume_text(text: str) -> bool:
+    """Reject binary/garbage extraction (e.g. regex fallback on complex PDFs)."""
+    if len(text) < 35:
+        return False
+    letters = sum(1 for c in text if c.isalpha())
+    if letters == 0 or letters / len(text) < 0.12:
+        return False
+    if text.count(" ") + text.count("\n") < 4:
+        return False
+    return True
 
 
 # --- Field extraction ------------------------------------------------------
@@ -301,55 +338,75 @@ Return this exact structure:
 """
 
 
-def _llm_connection() -> tuple[str, str, str]:
+def _groq_key_and_model() -> tuple[str, str]:
     groq = os.environ.get("GROQ_API_KEY", "").strip()
-    if groq:
-        base = os.environ.get("LLM_BASE_URL", "https://api.groq.com/openai/v1").rstrip("/")
-        model = os.environ.get("LLM_MODEL", "llama-3.3-70b-versatile")
-        return groq, base, model
-    key = (os.environ.get("OPENAI_API_KEY") or os.environ.get("LLM_API_KEY") or "").strip()
-    if not key:
+    if not groq:
         raise ValueError(
-            "LLM resume extraction requires GROQ_API_KEY or OPENAI_API_KEY (or LLM_API_KEY)."
+            "Resume LLM uses Groq only. Set GROQ_API_KEY in backend/.env "
+            "(see load_dotenv in this module)."
         )
-    base = os.environ.get("LLM_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-    model = os.environ.get("LLM_MODEL", "gpt-4o-mini")
-    return key, base, model
-
-
-def _post_chat_completion(prompt: str, *, timeout_s: int = 120) -> str:
-    api_key, base_url, model = _llm_connection()
-    url = f"{base_url}/chat/completions"
-    body: dict[str, Any] = {
-        "model": model,
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.2,
-    }
-    if "api.openai.com" in base_url:
-        body["response_format"] = {"type": "json_object"}
-    data = json.dumps(body).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=data,
-        method="POST",
-        headers={
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        },
+    model = (
+        os.environ.get("GROQ_MODEL")
+        or os.environ.get("LLM_MODEL")
+        or "llama-3.3-70b-versatile"
     )
-    try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:
-            payload = json.loads(resp.read().decode("utf-8"))
-    except urllib.error.HTTPError as exc:
-        err_body = exc.read().decode("utf-8", errors="replace")
-        raise RuntimeError(f"LLM API error {exc.code}: {err_body}") from exc
-    except urllib.error.URLError as exc:
-        raise RuntimeError(f"LLM request failed: {exc.reason}") from exc
+    return groq, model
 
+
+def _post_chat_completion(prompt: str, *, timeout_s: float = 120.0) -> str:
+    """
+    Call Groq via the official SDK. Raw urllib triggers Cloudflare 403 / error 1010 for many clients.
+    """
+    api_key, model = _groq_key_and_model()
     try:
-        return payload["choices"][0]["message"]["content"]
-    except (KeyError, IndexError, TypeError) as exc:
-        raise RuntimeError(f"Unexpected LLM response shape: {payload!r}") from exc
+        from groq import Groq
+    except ImportError as exc:
+        raise RuntimeError(
+            "Install the Groq SDK: pip install groq (listed in backend/requirements.txt)."
+        ) from exc
+
+    # Groq() defaults to base_url=https://api.groq.com; the SDK appends /openai/v1/....
+    # Passing .../openai/v1 as base_url duplicates the path (404 unknown_url).
+    client = Groq(api_key=api_key)
+    system_msg = (
+        "You reply with a single valid JSON object only. No markdown fences, no commentary."
+    )
+    user_messages = [
+        {"role": "system", "content": system_msg},
+        {"role": "user", "content": prompt},
+    ]
+    try:
+        completion = client.chat.completions.create(
+            model=model,
+            messages=user_messages,
+            temperature=0.2,
+            timeout=timeout_s,
+            max_completion_tokens=8192,
+            response_format={"type": "json_object"},
+        )
+    except Exception:
+        # Some models reject json_object; retry without it.
+        try:
+            completion = client.chat.completions.create(
+                model=model,
+                messages=user_messages,
+                temperature=0.2,
+                timeout=timeout_s,
+                max_completion_tokens=8192,
+            )
+        except Exception as second_exc:
+            raise RuntimeError(f"Groq API request failed: {second_exc}") from second_exc
+
+    if not completion.choices:
+        raise RuntimeError(f"Groq returned no choices: {completion!r}")
+    content = completion.choices[0].message.content
+    out = content if content is not None else ""
+    if not out.strip():
+        raise RuntimeError(
+            "Groq returned empty message content. The PDF text may be empty, too long, or blocked; "
+            "try another PDF or set GROQ_MODEL to a supported chat model."
+        )
+    return out
 
 
 def _strip_markdown_json_fence(text: str) -> str:
@@ -365,11 +422,30 @@ def _strip_markdown_json_fence(text: str) -> str:
 
 
 def _parse_llm_json(content: str) -> dict[str, Any]:
-    raw = _strip_markdown_json_fence(content)
-    parsed = json.loads(raw)
-    if not isinstance(parsed, dict):
-        raise ValueError("LLM returned JSON that is not an object.")
-    return parsed
+    raw = _strip_markdown_json_fence((content or "").strip())
+    if not raw:
+        raise ValueError("LLM returned empty text; cannot parse JSON.")
+
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except json.JSONDecodeError:
+        pass
+
+    idx = raw.find("{")
+    if idx >= 0:
+        try:
+            parsed, _ = json.JSONDecoder().raw_decode(raw[idx:])
+            if isinstance(parsed, dict):
+                return parsed
+        except json.JSONDecodeError:
+            pass
+
+    preview = raw[:400].replace("\n", " ")
+    raise ValueError(
+        f"LLM did not return parseable JSON. Start of response: {preview!r}"
+    )
 
 
 def _coerce_str(v: Any) -> str:
@@ -479,6 +555,10 @@ def _normalize_structured_resume(data: dict[str, Any]) -> dict[str, Any]:
     return base
 
 
+# Groq context limits vary by model; very long prompts can yield empty completions.
+_MAX_RESUME_CHARS_FOR_LLM = 24_000
+
+
 def resume_text_to_structured(resume_text: str) -> dict[str, Any]:
     """
     Call the configured LLM to map plain resume text into the structured schema.
@@ -486,6 +566,13 @@ def resume_text_to_structured(resume_text: str) -> dict[str, Any]:
     text = resume_text.strip()
     if not text:
         return _empty_resume_structure()
+    text = _sanitize_extracted_text(text)
+    if not _is_plausible_resume_text(text):
+        raise ValueError(
+            "Resume text is not readable enough to parse (too short or looks like corrupted/binary data)."
+        )
+    if len(text) > _MAX_RESUME_CHARS_FOR_LLM:
+        text = text[:_MAX_RESUME_CHARS_FOR_LLM] + "\n\n[... truncated for API length ...]"
     prompt = build_structured_resume_prompt(text)
     content = _post_chat_completion(prompt)
     print("[resume_parser] LLM raw response:")
@@ -502,7 +589,23 @@ def structure_resume_from_pdf_bytes(resume_bytes: bytes) -> dict[str, Any]:
     Single entrypoint: PDF bytes → extracted text → LLM → structured JSON
     (name, email, skills, experience, education, projects, etc.).
     """
-    resume_text = pdf_to_text(resume_bytes)
+    raw = _extract_text_pypdf(resume_bytes)
+    if raw is None:
+        raise ValueError(
+            "pypdf is not installed in the Python environment running the API. "
+            "Activate your backend venv, then: pip install pypdf "
+            "(or: python -m pip install pypdf — must be the same interpreter as uvicorn)."
+        )
+    resume_text = raw.strip()
+    if not resume_text:
+        resume_text = _extract_text_fallback(resume_bytes).strip()
+    resume_text = _sanitize_extracted_text(resume_text)
+    if not _is_plausible_resume_text(resume_text):
+        raise ValueError(
+            "Could not extract readable text from this PDF. It may be image-only "
+            "(scan), encrypted, or use fonts that block extraction. Export as a "
+            "text-based PDF or ensure pypdf can read it."
+        )
     return resume_text_to_structured(resume_text)
 
 

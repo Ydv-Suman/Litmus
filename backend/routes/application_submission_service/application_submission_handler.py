@@ -9,8 +9,10 @@ from sqlalchemy.orm import Session
 
 from database import SessionLocal
 from models.applications_received import ApplicationReceived
+from models.job_listing import JobListing
 from s3_config.s3_helper import delete_file_from_s3, upload_file_to_s3
 from service.resume_parser import structure_resume_from_pdf_bytes
+from service.resume_reality_match import compute_resume_reality_match
 
 
 logger = logging.getLogger(__name__)
@@ -108,10 +110,26 @@ def submit_application(
     cleaned_linkedin_url = normalize_url(require_text(linkedin_url, "LinkedIn URL"))
 
     resume_parsed: dict[str, Any] | None = None
+    resume_parse_error: str | None = None
     try:
         resume_parsed = structure_resume_from_pdf_bytes(resume_bytes)
-    except Exception:
+    except Exception as exc:
+        resume_parse_error = str(exc)
         logger.exception("Resume LLM parsing failed; application will still be stored.")
+
+    job = db.query(JobListing).filter(JobListing.id == job_id).first()
+    reality_match: dict[str, Any] | None = None
+    reality_match_error: str | None = None
+    if not job:
+        reality_match_error = "Job listing is missing or inactive."
+    elif resume_parsed:
+        try:
+            reality_match = compute_resume_reality_match(job, resume_parsed)
+        except Exception as exc:
+            reality_match_error = str(exc)
+            logger.exception("Resume vs reality scoring failed.")
+    else:
+        reality_match_error = "Skipped until resume is parsed successfully."
 
     uploaded_resume = upload_file_to_s3(
         BytesIO(resume_bytes),
@@ -155,4 +173,7 @@ def submit_application(
         "resume_url": uploaded_resume["url"],
         "status": application.status,
         "resume_parsed": resume_parsed,
+        "resume_parse_error": resume_parse_error,
+        "resume_vs_reality": reality_match,
+        "resume_vs_reality_error": reality_match_error,
     }
