@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual env
+.venv/
+
+# Env files (CRITICAL)
+.env
+
+# Mac
+.DS_Store
+CLAUDE.md
+AGENTS.md
