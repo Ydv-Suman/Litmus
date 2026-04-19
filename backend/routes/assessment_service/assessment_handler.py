@@ -87,6 +87,7 @@ def submit_assessment(
 
     row.assessment_score = float(mcq_score)
     row.assessment_submitted_at = datetime.now(timezone.utc)
+    row.assessment_answers = payload.answers
     row.status = "assessment_completed"
     db.commit()
 

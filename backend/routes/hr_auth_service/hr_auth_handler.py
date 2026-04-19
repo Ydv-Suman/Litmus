@@ -233,6 +233,59 @@ def delete_hr_user(user_id: int, db: Session = Depends(get_db)):
     }
 
 
+@router.get("/{user_id}/applications/{application_id}")
+def get_hr_application_detail(user_id: int, application_id: int, db: Session = Depends(get_db)):
+    get_active_hr_user(db, user_id)
+
+    result = (
+        db.query(ApplicationReceived, JobListing)
+        .join(JobListing, ApplicationReceived.job_id == JobListing.id)
+        .filter(
+            ApplicationReceived.id == application_id,
+            JobListing.hr_user_id == user_id,
+            JobListing.is_deleted.is_(False),
+            ApplicationReceived.is_deleted.is_(False),
+        )
+        .first()
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="Application not found.")
+
+    application, job = result
+
+    assessment_with_answers = None
+    if application.assessment_payload:
+        import copy
+        payload = copy.deepcopy(application.assessment_payload)
+        if application.assessment_answers:
+            for q in payload.get("part1_mcq") or []:
+                q["candidate_answer"] = application.assessment_answers.get(str(q.get("id")))
+        assessment_with_answers = payload
+
+    return {
+        "application_id": application.id,
+        "full_name": application.full_name,
+        "email": application.email,
+        "phone": application.phone,
+        "github_url": application.github_url,
+        "linkedin_url": application.linkedin_url,
+        "status": application.status,
+        "job": {"id": job.id, "title": job.title, "department": job.department},
+        "submitted_at": application.created_at,
+        "screening_passed": application.screening_passed,
+        "pipeline_resume_points": application.pipeline_resume_points,
+        "pipeline_linkedin_points": application.pipeline_linkedin_points,
+        "pipeline_total": application.pipeline_total,
+        "pipeline_max": application.pipeline_max,
+        "resume_detail": application.resume_detail,
+        "github_detail": application.github_detail,
+        "linkedin_detail": application.linkedin_detail,
+        "assessment_score": application.assessment_score,
+        "assessment_submitted_at": application.assessment_submitted_at,
+        "assessment": assessment_with_answers,
+    }
+
+
 @router.get("/{user_id}/applications")
 def list_hr_applications(user_id: int, db: Session = Depends(get_db)):
     get_active_hr_user(db, user_id)
