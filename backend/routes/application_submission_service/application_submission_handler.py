@@ -128,6 +128,15 @@ def get_active_job_or_404(db: Session, job_id: int) -> JobListing:
     return job
 
 
+def _resume_url_value(resume_parsed: dict[str, Any] | None, key: str) -> str | None:
+    if not isinstance(resume_parsed, dict):
+        return None
+    value = resume_parsed.get(key)
+    if not value or not str(value).strip():
+        return None
+    return str(value).strip()
+
+
 @router.post("")
 def submit_application(
     full_name: str = Form(...),
@@ -152,8 +161,8 @@ def submit_application(
     cleaned_full_name = require_text(full_name, "Full name")
     cleaned_email = require_text(email, "Email").lower()
     cleaned_phone = require_text(phone, "Phone")
-    cleaned_github_url = normalize_optional_url(github_url)
-    cleaned_linkedin_url = (
+    submitted_github_url = normalize_optional_url(github_url)
+    submitted_linkedin_url = (
         normalize_url(require_text(linkedin_url, "LinkedIn URL"))
         if linkedin_url and linkedin_url.strip()
         else None
@@ -167,6 +176,13 @@ def submit_application(
     except Exception as exc:
         resume_parse_error = str(exc)
         logger.exception("Resume LLM parsing failed; application will still be stored.")
+
+    cleaned_github_url = submitted_github_url or normalize_optional_url(_resume_url_value(resume_parsed, "github_url"))
+    cleaned_linkedin_url = submitted_linkedin_url or (
+        normalize_url(_resume_url_value(resume_parsed, "linkedin_url"))
+        if _resume_url_value(resume_parsed, "linkedin_url")
+        else None
+    )
 
     reality_match: dict[str, Any] | None = None
     reality_match_error: str | None = None
@@ -192,7 +208,6 @@ def submit_application(
             logger.exception("GitHub credibility scoring failed.")
     else:
         github_analysis_error = "Skipped because no GitHub URL was provided."
-    screening = compute_pipeline_screening(reality_match, cleaned_linkedin_url)
 
     linkedin_analysis: dict[str, Any] | None = None
     linkedin_analysis_error: str | None = None
@@ -208,6 +223,12 @@ def submit_application(
             logger.exception("LinkedIn credibility scoring failed.")
     else:
         linkedin_analysis_error = "Skipped because no LinkedIn URL was provided."
+
+    screening = compute_pipeline_screening(
+        reality_match,
+        github_analysis,
+        linkedin_analysis,
+    )
 
     uploaded_resume = upload_file_to_s3(
         BytesIO(resume_bytes),
@@ -245,7 +266,11 @@ def submit_application(
         linkedin_url=cleaned_linkedin_url,
         job_id=job_id,
         pipeline_resume_points=screening["pipeline_resume_points"],
+        pipeline_resume_max=screening["pipeline_resume_max"],
+        pipeline_github_points=screening["pipeline_github_points"],
+        pipeline_github_max=screening["pipeline_github_max"],
         pipeline_linkedin_points=screening["pipeline_linkedin_points"],
+        pipeline_linkedin_max=screening["pipeline_linkedin_max"],
         pipeline_total=screening["pipeline_total"],
         pipeline_max=screening["pipeline_max"],
         screening_passed=passed_screening,
@@ -303,6 +328,12 @@ def submit_application(
     }
 
     if not passed_screening:
+        application.submission_response_payload = response
+        try:
+            db.commit()
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception("Failed to persist application submission response payload.")
         return response
 
     assert assessment_url and assessment_token and job is not None
@@ -333,4 +364,10 @@ def submit_application(
         if email_sent
         else "Application submitted. Use the assessment URL below to continue."
     )
+    application.submission_response_payload = response
+    try:
+        db.commit()
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Failed to persist application submission response payload.")
     return response

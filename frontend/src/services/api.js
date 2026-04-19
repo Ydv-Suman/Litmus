@@ -50,11 +50,23 @@ export function getAssessment(token) {
   return apiRequest(`/assessment/${encodeURIComponent(token)}`)
 }
 
-export function submitAssessmentAnswers(token, answers) {
+export function runAssessmentCode(token, payload) {
+  return apiRequest(`/assessment/${encodeURIComponent(token)}/run`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
+export function submitAssessment(token, payload) {
   return apiRequest(`/assessment/${encodeURIComponent(token)}/submit`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ answers }),
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
   })
 }
 
@@ -79,11 +91,13 @@ export function loginHrUser(payload) {
 }
 
 export function getHrApplications(userId) {
-  return apiRequest(`/hr/${userId}/applications`)
+  return apiRequest(`/hr/${encodeURIComponent(userId)}/applications`)
 }
 
 export function getHrApplicationDetail(userId, applicationId) {
-  return apiRequest(`/hr/${userId}/applications/${applicationId}`)
+  return apiRequest(
+    `/hr/${encodeURIComponent(userId)}/applications/${encodeURIComponent(applicationId)}`,
+  )
 }
 
 export { apiRequest, API_BASE_URL }
