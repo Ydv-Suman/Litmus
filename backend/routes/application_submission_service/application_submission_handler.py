@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 from typing import Any, Generator
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, UploadFile
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session
@@ -137,8 +137,219 @@ def _resume_url_value(resume_parsed: dict[str, Any] | None, key: str) -> str | N
     return str(value).strip()
 
 
+def _persist_submission_response_payload(
+    db: Session,
+    application: ApplicationReceived,
+    payload: dict[str, Any],
+) -> None:
+    application.submission_response_payload = payload
+    try:
+        db.commit()
+        db.refresh(application)
+    except SQLAlchemyError:
+        db.rollback()
+        logger.exception("Failed to persist application submission response payload.")
+
+
+def _process_application_submission_in_background(
+    *,
+    application_id: int,
+    resume_bytes: bytes,
+    cleaned_full_name: str,
+    cleaned_email: str,
+    cleaned_github_url: str | None,
+    cleaned_linkedin_url: str | None,
+    job_id: int,
+) -> None:
+    db = SessionLocal()
+    try:
+        application = (
+            db.query(ApplicationReceived)
+            .filter(ApplicationReceived.id == application_id, ApplicationReceived.is_deleted.is_(False))
+            .first()
+        )
+        if application is None:
+            logger.warning("Background submission processing skipped because application %s no longer exists.", application_id)
+            return
+
+        job = get_active_job_or_404(db, job_id)
+
+        resume_parsed: dict[str, Any] | None = None
+        resume_parse_error: str | None = None
+        try:
+            resume_parsed = structure_resume_from_pdf_bytes(resume_bytes)
+        except Exception as exc:  # noqa: BLE001
+            resume_parse_error = str(exc)
+            logger.exception("Resume LLM parsing failed in background processing.")
+
+        resolved_github_url = cleaned_github_url or normalize_optional_url(_resume_url_value(resume_parsed, "github_url"))
+        resolved_linkedin_url = cleaned_linkedin_url or (
+            normalize_url(_resume_url_value(resume_parsed, "linkedin_url"))
+            if _resume_url_value(resume_parsed, "linkedin_url")
+            else None
+        )
+
+        reality_match: dict[str, Any] | None = None
+        reality_match_error: str | None = None
+        if resume_parsed:
+            try:
+                reality_match = compute_resume_reality_match(job, resume_parsed)
+            except Exception as exc:  # noqa: BLE001
+                reality_match_error = str(exc)
+                logger.exception("Resume vs job scoring failed in background processing.")
+        else:
+            reality_match_error = "Skipped until resume is parsed successfully."
+
+        github_analysis: dict[str, Any] | None = None
+        github_analysis_error: str | None = None
+        if resolved_github_url:
+            try:
+                github_analysis = analyze_github_profile(
+                    resolved_github_url,
+                    resume_data=resume_parsed,
+                )
+            except Exception as exc:  # noqa: BLE001
+                github_analysis_error = str(exc)
+                logger.exception("GitHub credibility scoring failed in background processing.")
+        else:
+            github_analysis_error = "Skipped because no GitHub URL was provided."
+
+        linkedin_analysis: dict[str, Any] | None = None
+        linkedin_analysis_error: str | None = None
+        if resolved_linkedin_url:
+            try:
+                linkedin_analysis = analyze_linkedin_profile(
+                    resolved_linkedin_url,
+                    resume_data=resume_parsed,
+                    job=job,
+                )
+            except Exception as exc:  # noqa: BLE001
+                linkedin_analysis_error = str(exc)
+                logger.exception("LinkedIn credibility scoring failed in background processing.")
+        else:
+            linkedin_analysis_error = "Skipped because no LinkedIn URL was provided."
+
+        screening = compute_pipeline_screening(
+            reality_match,
+            github_analysis,
+            linkedin_analysis,
+        )
+
+        passed_screening = bool(screening and screening.get("screening_passed"))
+        assessment_token: str | None = None
+        assessment_payload: dict[str, Any] | None = None
+        assessment_url: str | None = None
+        email_sent = False
+        assessment_sent_at = None
+
+        if passed_screening:
+            try:
+                assessment_payload = generate_technical_assessment(job)
+                assessment_token = secrets.token_urlsafe(32)
+                assessment_url = f"{_assessment_base_url()}/assessment/{assessment_token}"
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("Assessment generation failed in background processing.")
+                passed_screening = False
+                github_analysis_error = github_analysis_error
+                linkedin_analysis_error = linkedin_analysis_error
+                screening = {
+                    **screening,
+                    "screening_passed": False,
+                }
+                assessment_payload = None
+                assessment_token = None
+                assessment_url = None
+                resume_parse_error = resume_parse_error or f"Assessment generation failed: {exc}"
+
+        application.github_url = resolved_github_url
+        application.linkedin_url = resolved_linkedin_url
+        application.pipeline_resume_points = screening["pipeline_resume_points"]
+        application.pipeline_resume_max = screening["pipeline_resume_max"]
+        application.pipeline_github_points = screening["pipeline_github_points"]
+        application.pipeline_github_max = screening["pipeline_github_max"]
+        application.pipeline_linkedin_points = screening["pipeline_linkedin_points"]
+        application.pipeline_linkedin_max = screening["pipeline_linkedin_max"]
+        application.pipeline_total = screening["pipeline_total"]
+        application.pipeline_max = screening["pipeline_max"]
+        application.screening_passed = passed_screening
+        application.assessment_token = assessment_token
+        application.assessment_payload = assessment_payload
+        application.assessment_sent_at = None
+        application.status = "assessment_invited" if passed_screening and assessment_token else "screening_failed"
+        application.resume_detail = {"parsed": resume_parsed, "reality_match": reality_match}
+        application.github_detail = github_analysis
+        application.linkedin_detail = {
+            "analysis": linkedin_analysis,
+            "screening": screening.get("linkedin_detail"),
+        }
+
+        response: dict[str, Any] = {
+            "message": "Application processing completed.",
+            "passed_screening": passed_screening,
+            "application_id": application.id,
+            "resume_url": None,
+            "status": application.status,
+            "resume_parsed": resume_parsed,
+            "resume_parse_error": resume_parse_error,
+            "resume_vs_reality": reality_match,
+            "resume_vs_reality_error": reality_match_error,
+            "github_analysis": github_analysis,
+            "github_analysis_error": github_analysis_error,
+            "pipeline_screening": screening,
+            "linkedin_analysis": linkedin_analysis,
+            "linkedin_analysis_error": linkedin_analysis_error,
+        }
+
+        try:
+            db.commit()
+            db.refresh(application)
+        except SQLAlchemyError:
+            db.rollback()
+            logger.exception("Failed to persist background screening results for application %s.", application.id)
+            return
+
+        if passed_screening and assessment_url:
+            email_sent = send_html_email(
+                to_address=cleaned_email,
+                subject=f"Technical assessment — {job.title}",
+                html_body=_build_assessment_email_html(cleaned_full_name.split()[0], assessment_url, job.title),
+                text_body=f"You passed resume screening for {job.title}. Open your assessment: {assessment_url}",
+            )
+            if email_sent:
+                assessment_sent_at = datetime.now(timezone.utc)
+                application.assessment_sent_at = assessment_sent_at
+                try:
+                    db.commit()
+                    db.refresh(application)
+                except SQLAlchemyError:
+                    db.rollback()
+                    logger.exception("Failed to persist assessment_sent_at for application %s.", application.id)
+            else:
+                response["email_note"] = (
+                    "Assessment link could not be emailed (configure SendGrid in backend/.env). "
+                    "Use assessment_url from this response."
+                )
+
+            response["assessment_url"] = assessment_url
+            response["email_sent"] = email_sent
+            response["message"] = (
+                "Application submitted and technical assessment generated. Check your email for the link."
+                if email_sent
+                else "Application submitted. Use the assessment URL below to continue."
+            )
+
+        _persist_submission_response_payload(db, application, response)
+    except HTTPException:
+        logger.exception("Background processing hit an HTTPException for application %s.", application_id)
+    except Exception:  # noqa: BLE001
+        logger.exception("Background processing failed for application %s.", application_id)
+    finally:
+        db.close()
+
+
 @router.post("")
 def submit_application(
+    background_tasks: BackgroundTasks,
     full_name: str = Form(...),
     email: str = Form(...),
     phone: str = Form(...),
@@ -169,67 +380,6 @@ def submit_application(
     )
     job = get_active_job_or_404(db, job_id)
 
-    resume_parsed: dict[str, Any] | None = None
-    resume_parse_error: str | None = None
-    try:
-        resume_parsed = structure_resume_from_pdf_bytes(resume_bytes)
-    except Exception as exc:
-        resume_parse_error = str(exc)
-        logger.exception("Resume LLM parsing failed; application will still be stored.")
-
-    cleaned_github_url = submitted_github_url or normalize_optional_url(_resume_url_value(resume_parsed, "github_url"))
-    cleaned_linkedin_url = submitted_linkedin_url or (
-        normalize_url(_resume_url_value(resume_parsed, "linkedin_url"))
-        if _resume_url_value(resume_parsed, "linkedin_url")
-        else None
-    )
-
-    reality_match: dict[str, Any] | None = None
-    reality_match_error: str | None = None
-    if resume_parsed:
-        try:
-            reality_match = compute_resume_reality_match(job, resume_parsed)
-        except Exception as exc:
-            reality_match_error = str(exc)
-            logger.exception("Resume vs job scoring failed.")
-    else:
-        reality_match_error = "Skipped until resume is parsed successfully."
-
-    github_analysis: dict[str, Any] | None = None
-    github_analysis_error: str | None = None
-    if cleaned_github_url:
-        try:
-            github_analysis = analyze_github_profile(
-                cleaned_github_url,
-                resume_data=resume_parsed,
-            )
-        except Exception as exc:
-            github_analysis_error = str(exc)
-            logger.exception("GitHub credibility scoring failed.")
-    else:
-        github_analysis_error = "Skipped because no GitHub URL was provided."
-
-    linkedin_analysis: dict[str, Any] | None = None
-    linkedin_analysis_error: str | None = None
-    if cleaned_linkedin_url:
-        try:
-            linkedin_analysis = analyze_linkedin_profile(
-                cleaned_linkedin_url,
-                resume_data=resume_parsed,
-                job=job,
-            )
-        except Exception as exc:
-            linkedin_analysis_error = str(exc)
-            logger.exception("LinkedIn credibility scoring failed.")
-    else:
-        linkedin_analysis_error = "Skipped because no LinkedIn URL was provided."
-
-    screening = compute_pipeline_screening(
-        reality_match,
-        github_analysis,
-        linkedin_analysis,
-    )
-
     uploaded_resume = upload_file_to_s3(
         BytesIO(resume_bytes),
         file_name=resume_file_name,
@@ -237,25 +387,8 @@ def submit_application(
         content_type=resume.content_type,
     )
 
-    now = datetime.now(timezone.utc)
-    assessment_token: str | None = None
-    assessment_payload: dict[str, Any] | None = None
-    assessment_url: str | None = None
-    email_sent = False
-    passed_screening = bool(screening and screening.get("screening_passed"))
-
-    if passed_screening and job:
-        try:
-            assessment_payload = generate_technical_assessment(job)
-            assessment_token = secrets.token_urlsafe(32)
-            assessment_url = f"{_assessment_base_url()}/assessment/{assessment_token}"
-        except Exception as exc:
-            cleanup_uploaded_resume(uploaded_resume["key"])
-            logger.exception("Assessment generation failed after screening passed.")
-            raise HTTPException(
-                status_code=503,
-                detail=f"Unable to generate the technical assessment. Please try again later. ({exc})",
-            ) from exc
+    cleaned_github_url = submitted_github_url
+    cleaned_linkedin_url = submitted_linkedin_url
 
     application = ApplicationReceived(
         full_name=cleaned_full_name,
@@ -265,22 +398,22 @@ def submit_application(
         github_url=cleaned_github_url,
         linkedin_url=cleaned_linkedin_url,
         job_id=job_id,
-        pipeline_resume_points=screening["pipeline_resume_points"],
-        pipeline_resume_max=screening["pipeline_resume_max"],
-        pipeline_github_points=screening["pipeline_github_points"],
-        pipeline_github_max=screening["pipeline_github_max"],
-        pipeline_linkedin_points=screening["pipeline_linkedin_points"],
-        pipeline_linkedin_max=screening["pipeline_linkedin_max"],
-        pipeline_total=screening["pipeline_total"],
-        pipeline_max=screening["pipeline_max"],
-        screening_passed=passed_screening,
-        assessment_token=assessment_token,
-        assessment_payload=assessment_payload,
+        pipeline_resume_points=None,
+        pipeline_resume_max=None,
+        pipeline_github_points=None,
+        pipeline_github_max=None,
+        pipeline_linkedin_points=None,
+        pipeline_linkedin_max=None,
+        pipeline_total=None,
+        pipeline_max=None,
+        screening_passed=None,
+        assessment_token=None,
+        assessment_payload=None,
         assessment_sent_at=None,
-        status="assessment_invited" if passed_screening and assessment_token else "screening_failed",
-        resume_detail={"parsed": resume_parsed, "reality_match": reality_match},
-        github_detail=github_analysis,
-        linkedin_detail={"analysis": linkedin_analysis, "screening": screening.get("linkedin_detail")},
+        status="submitted",
+        resume_detail=None,
+        github_detail=None,
+        linkedin_detail=None,
     )
 
     try:
@@ -309,65 +442,20 @@ def submit_application(
         ) from exc
 
     response: dict[str, Any] = {
-        "message": "Application submitted successfully."
-        if passed_screening
-        else "Application received. You did not meet the minimum screening score to proceed to the technical assessment.",
-        "passed_screening": passed_screening,
+        "message": "Application submitted. We will contact you for further steps through email.",
         "application_id": application.id,
         "resume_url": uploaded_resume["url"],
         "status": application.status,
-        "resume_parsed": resume_parsed,
-        "resume_parse_error": resume_parse_error,
-        "resume_vs_reality": reality_match,
-        "resume_vs_reality_error": reality_match_error,
-        "github_analysis": github_analysis,
-        "github_analysis_error": github_analysis_error,
-        "pipeline_screening": screening,
-        "linkedin_analysis": linkedin_analysis,
-        "linkedin_analysis_error": linkedin_analysis_error,
     }
-
-    if not passed_screening:
-        application.submission_response_payload = response
-        try:
-            db.commit()
-        except SQLAlchemyError:
-            db.rollback()
-            logger.exception("Failed to persist application submission response payload.")
-        return response
-
-    assert assessment_url and assessment_token and job is not None
-
-    email_sent = send_html_email(
-        to_address=cleaned_email,
-        subject=f"Technical assessment — {job.title}",
-        html_body=_build_assessment_email_html(cleaned_full_name.split()[0], assessment_url, job.title),
-        text_body=f"You passed resume screening for {job.title}. Open your assessment: {assessment_url}",
+    _persist_submission_response_payload(db, application, response)
+    background_tasks.add_task(
+        _process_application_submission_in_background,
+        application_id=application.id,
+        resume_bytes=resume_bytes,
+        cleaned_full_name=cleaned_full_name,
+        cleaned_email=cleaned_email,
+        cleaned_github_url=cleaned_github_url,
+        cleaned_linkedin_url=cleaned_linkedin_url,
+        job_id=job_id,
     )
-
-    if email_sent:
-        application.assessment_sent_at = now
-        try:
-            db.commit()
-        except SQLAlchemyError:
-            logger.exception("Failed to persist assessment_sent_at.")
-    else:
-        response["email_note"] = (
-            "Assessment link could not be emailed (configure SendGrid in backend/.env). "
-            "Use assessment_url from this response."
-        )
-
-    response["assessment_url"] = assessment_url
-    response["email_sent"] = email_sent
-    response["message"] = (
-        "Application submitted and technical assessment generated. Check your email for the link."
-        if email_sent
-        else "Application submitted. Use the assessment URL below to continue."
-    )
-    application.submission_response_payload = response
-    try:
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
-        logger.exception("Failed to persist application submission response payload.")
     return response

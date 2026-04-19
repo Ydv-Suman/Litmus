@@ -1,7 +1,7 @@
-"""add application response snapshot and assessment answers
+"""add application response snapshot and assessment score fields
 
 Revision ID: f6a7b8c9d0e1
-Revises: e5a1b2c3d4e5
+Revises: g7c3d4e5f6a7
 Create Date: 2026-04-18
 
 """
@@ -12,7 +12,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f6a7b8c9d0e1"
-down_revision: Union[str, Sequence[str], None] = "e5a1b2c3d4e5"
+down_revision: Union[str, Sequence[str], None] = "g7c3d4e5f6a7"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -78,14 +78,9 @@ def upgrade() -> None:
         "applications_received",
         sa.Column("final_score_max", sa.Float(), nullable=True),
     )
-    op.add_column(
-        "applications_received",
-        sa.Column("assessment_submitted_at", sa.DateTime(timezone=True), nullable=True),
-    )
 
 
 def downgrade() -> None:
-    op.drop_column("applications_received", "assessment_submitted_at")
     op.drop_column("applications_received", "final_score_max")
     op.drop_column("applications_received", "final_score")
     op.drop_column("applications_received", "assessment_total_max")

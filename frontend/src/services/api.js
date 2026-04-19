@@ -46,6 +46,16 @@ export function getJobs() {
   return apiRequest('/jobs')
 }
 
+export function createJob(payload) {
+  return apiRequest('/jobs', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+  })
+}
+
 export function getAssessment(token) {
   return apiRequest(`/assessment/${encodeURIComponent(token)}`)
 }

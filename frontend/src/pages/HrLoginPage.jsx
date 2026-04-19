@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 
 import Field from '../components/Field'
-import { getHrApplications, loginHrUser } from '../services/api'
+import { loginHrUser } from '../services/api'
 
 const initialFormData = {
   email: '',
@@ -10,15 +10,10 @@ const initialFormData = {
 }
 
 function HrLoginPage() {
+  const navigate = useNavigate()
   const [formData, setFormData] = useState(initialFormData)
   const [requestState, setRequestState] = useState({
     status: 'idle',
-    message: '',
-  })
-  const [loggedInUser, setLoggedInUser] = useState(null)
-  const [applicationsState, setApplicationsState] = useState({
-    status: 'idle',
-    items: [],
     message: '',
   })
 
@@ -34,248 +29,90 @@ function HrLoginPage() {
     event.preventDefault()
     setRequestState({
       status: 'submitting',
-      message: 'Logging in...',
+      message: 'Opening workspace…',
     })
 
     try {
       const response = await loginHrUser(formData)
-      setLoggedInUser(response.user || null)
-      setApplicationsState({
-        status: 'loading',
-        items: [],
-        message: 'Loading applications...',
-      })
-      const applications = await getHrApplications(response.user.id)
-      setRequestState({
-        status: 'success',
-        message: response.message || 'Login successful.',
-      })
-      setApplicationsState({
-        status: 'success',
-        items: Array.isArray(applications) ? applications : [],
-        message: '',
-      })
+      const user = response.user || null
+      if (user) {
+        localStorage.setItem('hr_user', JSON.stringify(user))
+        navigate('/hr/dashboard', { replace: true })
+      }
     } catch (error) {
-      setLoggedInUser(null)
+      localStorage.removeItem('hr_user')
       setRequestState({
         status: 'error',
         message: error.message || 'Failed to log in.',
-      })
-      setApplicationsState({
-        status: 'idle',
-        items: [],
-        message: '',
       })
     }
   }
 
   return (
-    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(167,243,208,0.34),transparent_24%),linear-gradient(135deg,#f3fff8_0%,#f3fbff_55%,#eef6f9_100%)] px-4 py-8 text-slate-900 sm:px-6 lg:px-8 lg:py-12">
-      <div className="mx-auto max-w-4xl">
-        <Link
-          className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/85 px-4 py-2 text-sm font-semibold text-slate-700 backdrop-blur"
-          to="/"
-        >
-          &larr; Back to portal
-        </Link>
+    <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(34,197,94,0.10),transparent_18%),radial-gradient(circle_at_80%_0%,rgba(14,165,233,0.12),transparent_24%),linear-gradient(180deg,#f4f0e8_0%,#f3f7f7_48%,#fafcfc_100%)] px-4 py-6 text-slate-900 sm:px-6 lg:px-8 lg:py-10">
+      <div className="mx-auto max-w-xl">
+        <div className="mb-5">
+          <Link
+            className="inline-flex items-center gap-2 rounded-full border border-slate-200 bg-white/90 px-4 py-2 text-sm font-semibold text-slate-700 transition hover:bg-white"
+            to="/"
+          >
+            &larr; Back to portal
+          </Link>
+        </div>
 
-        <section className="mt-6 rounded-[2rem] border border-emerald-200/80 bg-white/90 p-8 shadow-[0_28px_80px_rgba(15,23,42,0.12)] backdrop-blur">
-          <p className="text-xs font-extrabold uppercase tracking-[0.28em] text-emerald-800">
-            HR Login
+        <section className="rounded-[2rem] border border-slate-200/80 bg-white/92 p-6 shadow-[0_22px_70px_rgba(15,23,42,0.08)] backdrop-blur md:p-8">
+          <p className="text-[11px] font-black uppercase tracking-[0.28em] text-cyan-700">
+            HR Portal
           </p>
-          <h1 className="mt-3 text-3xl font-black sm:text-4xl">
-            Return to your hiring workspace
+          <h1 className="mt-3 text-3xl font-black tracking-tight text-slate-950 md:text-4xl">
+            Sign in
           </h1>
+          <p className="mt-2 text-sm leading-6 text-slate-600">
+            Open your hiring workspace.
+          </p>
 
-          <form className="mt-8 max-w-xl" onSubmit={handleSubmit}>
-            <div className="grid gap-5">
-              <Field
-                label="Work email"
-                name="email"
-                onChange={handleChange}
-                placeholder="hr@company.com"
-                required
-                type="email"
-                value={formData.email}
-              />
-              <Field
-                label="Password"
-                name="password"
-                onChange={handleChange}
-                placeholder="Your password"
-                required
-                type="password"
-                value={formData.password}
-              />
-            </div>
+          <form className="mt-8 space-y-5" onSubmit={handleSubmit}>
+            <Field
+              label="Work email"
+              name="email"
+              onChange={handleChange}
+              placeholder="hr@company.com"
+              required
+              type="email"
+              value={formData.email}
+            />
+            <Field
+              label="Password"
+              name="password"
+              onChange={handleChange}
+              placeholder="Your password"
+              required
+              type="password"
+              value={formData.password}
+            />
 
             {requestState.message ? (
               <div
-                className={`mt-6 rounded-2xl border px-4 py-3 text-sm font-medium ${
-                  requestState.status === 'success'
-                    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
-                    : requestState.status === 'error'
-                      ? 'border-rose-200 bg-rose-50 text-rose-900'
-                      : 'border-sky-200 bg-sky-50 text-sky-900'
+                className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${
+                  requestState.status === 'error'
+                    ? 'border-rose-200 bg-rose-50 text-rose-900'
+                    : 'border-cyan-200 bg-cyan-50 text-cyan-900'
                 }`}
               >
                 {requestState.message}
               </div>
             ) : null}
 
-            {loggedInUser ? (
-              <div className="mt-6 space-y-4">
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm leading-7 text-slate-700">
-                  Signed in as <strong>{loggedInUser.full_name}</strong> from{' '}
-                  <strong>{loggedInUser.company_name}</strong> in the{' '}
-                  <strong>{loggedInUser.department}</strong> team.
-                </div>
-
-                <div className="rounded-3xl border border-slate-200 bg-slate-50 p-5">
-                  <div className="flex items-center justify-between gap-3">
-                    <h2 className="text-lg font-black text-slate-900">
-                      Applications
-                    </h2>
-                    {applicationsState.status === 'loading' ? (
-                      <span className="text-sm font-medium text-slate-500">
-                        Loading...
-                      </span>
-                    ) : null}
-                  </div>
-
-                  {applicationsState.status === 'success' &&
-                  applicationsState.items.length === 0 ? (
-                    <p className="mt-4 text-sm text-slate-600">
-                      No applications found for this HR account.
-                    </p>
-                  ) : null}
-
-                  {applicationsState.status === 'success' &&
-                  applicationsState.items.length > 0 ? (
-                    <div className="mt-4 space-y-4">
-                      {applicationsState.items.map((application) => (
-                        <article
-                          key={application.application_id}
-                          className="rounded-3xl border border-white bg-white p-4 shadow-sm"
-                        >
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <h3 className="text-base font-black text-slate-900">
-                                {application.full_name}
-                              </h3>
-                              <p className="text-sm text-slate-600">
-                                {application.job?.title} | {application.email}
-                              </p>
-                            </div>
-                            <div className="rounded-full bg-slate-900 px-3 py-1 text-xs font-semibold text-white">
-                              {application.status}
-                            </div>
-                          </div>
-
-                          <div className="mt-3 grid gap-3 text-sm text-slate-700 sm:grid-cols-2">
-                            <div>
-                              <div className="font-semibold text-slate-900">
-                                Screening
-                              </div>
-                              <div>
-                                Resume: {application.pipeline_resume_points ?? 0} /{' '}
-                                {application.pipeline_resume_max ?? 0}
-                              </div>
-                              <div>
-                                GitHub: {application.pipeline_github_points ?? 0} /{' '}
-                                {application.pipeline_github_max ?? 0}
-                              </div>
-                              <div>
-                                LinkedIn: {application.pipeline_linkedin_points ?? 0} /{' '}
-                                {application.pipeline_linkedin_max ?? 0}
-                              </div>
-                              <div>
-                                {application.pipeline_total ?? 0} /{' '}
-                                {application.pipeline_max ?? 0}
-                              </div>
-                              <div>
-                                Passed: {application.screening_passed ? 'Yes' : 'No'}
-                              </div>
-                            </div>
-                            <div>
-                              <div className="font-semibold text-slate-900">
-                                Assessment
-                              </div>
-                              <div>
-                                Generated:{' '}
-                                {application.assessment_generated ? 'Yes' : 'No'}
-                              </div>
-                              <div>
-                                Submitted:{' '}
-                                {application.assessment_submitted_at
-                                  ? new Date(
-                                      application.assessment_submitted_at,
-                                    ).toLocaleString()
-                                  : 'No'}
-                              </div>
-                              <div>
-                                MCQ: {application.assessment_mcq_score ?? 0} /{' '}
-                                {application.assessment_mcq_max ?? 0}
-                              </div>
-                              <div>
-                                Coding: {application.assessment_coding_score ?? 0} /{' '}
-                                {application.assessment_coding_max ?? 0}
-                              </div>
-                              <div>
-                                Assessment total:{' '}
-                                {application.assessment_total_score ?? 0} /{' '}
-                                {application.assessment_total_max ?? 0}
-                              </div>
-                              <div>
-                                Final: {application.final_score ?? 0} /{' '}
-                                {application.final_score_max ?? 0}
-                              </div>
-                            </div>
-                          </div>
-
-                          {application.assessment_candidate_answers ? (
-                            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                              <div className="text-sm font-black text-slate-900">
-                                Candidate answers
-                              </div>
-                              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-slate-700">
-                                {JSON.stringify(
-                                  application.assessment_candidate_answers,
-                                  null,
-                                  2,
-                                )}
-                              </pre>
-                            </div>
-                          ) : null}
-
-                          {application.assessment_payload ? (
-                            <div className="mt-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                              <div className="text-sm font-black text-slate-900">
-                                Generated assessment
-                              </div>
-                              <pre className="mt-2 overflow-x-auto whitespace-pre-wrap text-xs text-slate-700">
-                                {JSON.stringify(application.assessment_payload, null, 2)}
-                              </pre>
-                            </div>
-                          ) : null}
-                        </article>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
-
-            <div className="mt-8 flex flex-wrap items-center gap-4">
+            <div className="flex flex-wrap items-center gap-4 pt-2">
               <button
-                className="rounded-full bg-slate-900 px-6 py-3 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
+                className="rounded-full bg-slate-950 px-6 py-3 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-70"
                 disabled={requestState.status === 'submitting'}
                 type="submit"
               >
-                {requestState.status === 'submitting' ? 'Logging in...' : 'Log in'}
+                {requestState.status === 'submitting' ? 'Opening…' : 'Log in'}
               </button>
               <Link
-                className="text-sm font-semibold text-slate-600 underline-offset-4 hover:underline"
+                className="text-sm font-bold text-slate-600 underline-offset-4 hover:underline"
                 to="/hr/signup"
               >
                 Need an account? Sign up

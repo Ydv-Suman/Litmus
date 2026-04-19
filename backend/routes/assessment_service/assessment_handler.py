@@ -448,6 +448,8 @@ def submit_assessment_for_candidate(
     row.assessment_coding_max = coding_max
     row.assessment_total_score = assessment_total_score
     row.assessment_total_max = assessment_total_max
+    row.assessment_score = assessment_total_score
+    row.assessment_answers = payload.mcq_answers
     row.final_score = final_score
     row.final_score_max = final_score_max
     row.assessment_submitted_at = submitted_at
