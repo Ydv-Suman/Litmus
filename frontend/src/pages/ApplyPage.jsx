@@ -159,16 +159,14 @@ function ApplyPage() {
     })
 
     try {
-      const response = await submitApplication({
+      await submitApplication({
         ...formData,
         job_id: Number(formData.job_id),
       })
 
       setSubmissionState({
         status: 'success',
-        message: response.assessment_url
-          ? `${response.message || 'Application submitted successfully.'} Open your assessment at ${response.assessment_url}`
-          : response.message || 'Application submitted successfully.',
+        message: 'Application submitted. We will contact you for further steps through email.',
       })
       setFormData(initialFormData)
     } catch (error) {
@@ -177,6 +175,26 @@ function ApplyPage() {
         message: error.message || 'Failed to submit application.',
       })
     }
+  }
+
+  if (submissionState.status === 'success') {
+    return (
+      <main className="min-h-screen bg-[radial-gradient(circle_at_top_left,rgba(249,196,74,0.28),transparent_28%),linear-gradient(135deg,#f8f5ee_0%,#eef4f8_50%,#dfe7f2_100%)] px-4 py-8 text-slate-900 sm:px-6 lg:px-8 lg:py-12">
+        <div className="mx-auto flex min-h-[70vh] max-w-3xl items-center justify-center">
+          <section className="w-full rounded-[2rem] border border-emerald-200 bg-white/90 p-10 text-center shadow-[0_28px_80px_rgba(15,23,42,0.12)] backdrop-blur">
+            <p className="text-xs font-extrabold uppercase tracking-[0.28em] text-emerald-800">
+              Submitted
+            </p>
+            <h1 className="mt-4 text-3xl font-black text-slate-950 sm:text-4xl">
+              Application submitted
+            </h1>
+            <p className="mt-4 text-sm font-semibold leading-7 text-slate-600 sm:text-base">
+              We will contact you for further steps through email.
+            </p>
+          </section>
+        </div>
+      </main>
+    )
   }
 
   return (

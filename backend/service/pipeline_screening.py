@@ -1,7 +1,9 @@
 """
-Pipeline screening score: resume vs job (0–20) plus optional LinkedIn URL validation (0–5).
+Aggregate screening score across resume, GitHub, and LinkedIn analyses.
 
-If LinkedIn is omitted, it is not evaluated and max points exclude the LinkedIn band.
+Each component contributes its actual scored points and max points when available.
+The applicant advances to the assessment when pipeline_total / pipeline_max meets
+the configured pass threshold.
 """
 
 from __future__ import annotations
@@ -10,9 +12,9 @@ import os
 from typing import Any
 
 RESUME_SCORE_MAX = 20.0
-LINKEDIN_SCORE_MAX = 5.0
+GITHUB_SCORE_MAX = 40.0
+LINKEDIN_SCORE_MAX = 30.0
 
-# Minimum fraction of (pipeline_max) required to continue to the technical assessment.
 _DEFAULT_PASS_RATIO = 0.62
 
 
@@ -23,81 +25,60 @@ def _pass_threshold_ratio() -> float:
         return _DEFAULT_PASS_RATIO
 
 
-def score_linkedin_url(url: str | None) -> tuple[float, float, dict[str, Any]]:
-    """
-    Returns (points, max_points_for_this_component, detail).
-    Max is LINKEDIN_SCORE_MAX when the candidate supplied a URL we evaluate; 0 when omitted.
-    """
-    if url is None or not str(url).strip():
-        return (
-            0.0,
-            0.0,
-            {"evaluated": False, "note": "LinkedIn not provided; not included in screening cap."},
-        )
-    u = str(url).strip().rstrip("/")
-    if _looks_like_linkedin_profile_path(u):
-        return (
-            LINKEDIN_SCORE_MAX,
-            LINKEDIN_SCORE_MAX,
-            {"evaluated": True, "valid_profile_shape": True},
-        )
-    return (
-        0.0,
-        LINKEDIN_SCORE_MAX,
-        {
-            "evaluated": True,
-            "valid_profile_shape": False,
-            "note": "LinkedIn URL did not match a typical public profile pattern.",
-        },
-    )
+def _component_points_max(
+    payload: dict[str, Any] | None,
+    *,
+    default_max: float,
+    missing_note: str,
+) -> tuple[float, float, dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return 0.0, 0.0, {"evaluated": False, "note": missing_note}
 
-
-def _looks_like_linkedin_profile_path(url: str) -> bool:
-    """Typical public profile or company: linkedin.com/... with /in/, /pub/, or /company/."""
-    lower = url.lower()
-    if "linkedin.com" not in lower:
-        return False
-    return (
-        "/in/" in lower
-        or "/pub/" in lower
-        or "/company/" in lower
-        or "/school/" in lower
-    )
+    points = float(payload.get("points") or payload.get("total_points") or 0.0)
+    max_points = float(payload.get("max_points") or default_max or 0.0)
+    return points, max_points, {"evaluated": True}
 
 
 def compute_pipeline_screening(
     reality_match: dict[str, Any] | None,
-    linkedin_url: str | None,
+    github_analysis: dict[str, Any] | None,
+    linkedin_analysis: dict[str, Any] | None,
 ) -> dict[str, Any]:
-    """
-    Aggregate resume match total_points with optional LinkedIn component.
+    resume_pts, resume_max, resume_detail = _component_points_max(
+        reality_match,
+        default_max=RESUME_SCORE_MAX,
+        missing_note="Resume-to-job analysis was unavailable.",
+    )
+    github_pts, github_max, github_detail = _component_points_max(
+        github_analysis,
+        default_max=GITHUB_SCORE_MAX,
+        missing_note="GitHub analysis was unavailable.",
+    )
+    linkedin_pts, linkedin_max, linkedin_detail = _component_points_max(
+        linkedin_analysis,
+        default_max=LINKEDIN_SCORE_MAX,
+        missing_note="LinkedIn analysis was unavailable.",
+    )
 
-    pipeline_max = resume_max (usually 20) + linkedin band max (0 or 5).
-    """
-    resume_pts = 0.0
-    resume_max = RESUME_SCORE_MAX
-    if reality_match is not None:
-        resume_pts = float(reality_match.get("total_points") or 0.0)
-        resume_max = float(reality_match.get("max_points") or RESUME_SCORE_MAX)
-
-    li_pts, li_max, li_detail = score_linkedin_url(linkedin_url)
-
-    pipeline_max = resume_max + li_max
-    pipeline_total = resume_pts + li_pts
-
+    pipeline_total = resume_pts + github_pts + linkedin_pts
+    pipeline_max = resume_max + github_max + linkedin_max
     ratio = _pass_threshold_ratio()
-    min_to_pass = round(pipeline_max * ratio, 2)
-    passed = pipeline_total >= min_to_pass - 1e-6
+    minimum_points_to_pass = round(pipeline_max * ratio, 2) if pipeline_max > 0 else 0.0
+    screening_passed = pipeline_total >= minimum_points_to_pass - 1e-6 if pipeline_max > 0 else False
 
     return {
         "pipeline_resume_points": round(resume_pts, 2),
-        "pipeline_resume_max": resume_max,
-        "pipeline_linkedin_points": round(li_pts, 2),
-        "pipeline_linkedin_max": li_max,
-        "linkedin_detail": li_detail,
+        "pipeline_resume_max": round(resume_max, 2),
+        "pipeline_github_points": round(github_pts, 2),
+        "pipeline_github_max": round(github_max, 2),
+        "pipeline_linkedin_points": round(linkedin_pts, 2),
+        "pipeline_linkedin_max": round(linkedin_max, 2),
+        "resume_detail": resume_detail,
+        "github_detail": github_detail,
+        "linkedin_detail": linkedin_detail,
         "pipeline_total": round(pipeline_total, 2),
         "pipeline_max": round(pipeline_max, 2),
         "pass_threshold_ratio": ratio,
-        "minimum_points_to_pass": min_to_pass,
-        "screening_passed": passed,
+        "minimum_points_to_pass": minimum_points_to_pass,
+        "screening_passed": screening_passed,
     }

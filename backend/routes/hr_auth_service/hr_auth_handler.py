@@ -257,9 +257,16 @@ def get_hr_application_detail(user_id: int, application_id: int, db: Session = D
     if application.assessment_payload:
         import copy
         payload = copy.deepcopy(application.assessment_payload)
-        if application.assessment_answers:
+        candidate_answers = None
+        if isinstance(application.assessment_candidate_answers, dict):
+            raw_mcq_answers = application.assessment_candidate_answers.get("mcq_answers")
+            if isinstance(raw_mcq_answers, dict):
+                candidate_answers = raw_mcq_answers
+        if candidate_answers is None and application.assessment_answers:
+            candidate_answers = application.assessment_answers
+        if candidate_answers:
             for q in payload.get("part1_mcq") or []:
-                q["candidate_answer"] = application.assessment_answers.get(str(q.get("id")))
+                q["candidate_answer"] = candidate_answers.get(str(q.get("id")))
         assessment_with_answers = payload
 
     return {
@@ -280,7 +287,15 @@ def get_hr_application_detail(user_id: int, application_id: int, db: Session = D
         "resume_detail": application.resume_detail,
         "github_detail": application.github_detail,
         "linkedin_detail": application.linkedin_detail,
-        "assessment_score": application.assessment_score,
+        "assessment_score": application.assessment_total_score if application.assessment_total_score is not None else application.assessment_score,
+        "assessment_mcq_score": application.assessment_mcq_score,
+        "assessment_mcq_max": application.assessment_mcq_max,
+        "assessment_coding_score": application.assessment_coding_score,
+        "assessment_coding_max": application.assessment_coding_max,
+        "assessment_total_score": application.assessment_total_score,
+        "assessment_total_max": application.assessment_total_max,
+        "assessment_candidate_answers": application.assessment_candidate_answers,
+        "assessment_run_result": application.assessment_run_result,
         "assessment_submitted_at": application.assessment_submitted_at,
         "assessment": assessment_with_answers,
     }
@@ -312,6 +327,29 @@ def list_hr_applications(user_id: int, db: Session = Depends(get_db)):
             "github_url": application.github_url,
             "linkedin_url": application.linkedin_url,
             "status": application.status,
+            "screening_passed": application.screening_passed,
+            "pipeline_resume_points": application.pipeline_resume_points,
+            "pipeline_resume_max": application.pipeline_resume_max,
+            "pipeline_github_points": application.pipeline_github_points,
+            "pipeline_github_max": application.pipeline_github_max,
+            "pipeline_linkedin_points": application.pipeline_linkedin_points,
+            "pipeline_linkedin_max": application.pipeline_linkedin_max,
+            "pipeline_total": application.pipeline_total,
+            "pipeline_max": application.pipeline_max,
+            "assessment_generated": bool(application.assessment_payload),
+            "assessment_submitted_at": application.assessment_submitted_at,
+            "assessment_mcq_score": application.assessment_mcq_score,
+            "assessment_mcq_max": application.assessment_mcq_max,
+            "assessment_coding_score": application.assessment_coding_score,
+            "assessment_coding_max": application.assessment_coding_max,
+            "assessment_total_score": application.assessment_total_score,
+            "assessment_total_max": application.assessment_total_max,
+            "final_score": application.final_score,
+            "final_score_max": application.final_score_max,
+            "assessment_run_result": application.assessment_run_result,
+            "assessment_candidate_answers": application.assessment_candidate_answers,
+            "assessment_payload": application.assessment_payload,
+            "submission_response_payload": application.submission_response_payload,
             "job": {
                 "id": job.id,
                 "title": job.title,
@@ -322,7 +360,7 @@ def list_hr_applications(user_id: int, db: Session = Depends(get_db)):
             "pipeline_total": application.pipeline_total,
             "pipeline_max": application.pipeline_max,
             "assessment_sent_at": application.assessment_sent_at,
-            "assessment_score": application.assessment_score,
+            "assessment_score": application.assessment_total_score if application.assessment_total_score is not None else application.assessment_score,
             "assessment_submitted_at": application.assessment_submitted_at,
         }
         for application, job in applications

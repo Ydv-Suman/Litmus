@@ -98,6 +98,16 @@ def _skills_hint(job: JobListing) -> str:
     return ""
 
 
+def _preferred_coding_language(job: JobListing) -> str:
+    skills = _skills_hint(job).lower()
+    description = (job.description or "").lower()
+    title = (job.title or "").lower()
+    corpus = " ".join([skills, description, title])
+    if any(keyword in corpus for keyword in ("python", "fastapi", "django", "flask")):
+        return "python"
+    return "javascript"
+
+
 def _validate_payload(data: dict[str, Any]) -> None:
     mcq = data.get("part1_mcq")
     if not isinstance(mcq, list) or len(mcq) != 10:
@@ -115,16 +125,29 @@ def _validate_payload(data: dict[str, Any]) -> None:
     part2 = data.get("part2_coding")
     if not isinstance(part2, dict):
         raise ValueError("part2_coding must be an object.")
-    for key in ("title", "instructions", "starter_code", "test_cases"):
+    for key in ("title", "language", "function_name", "instructions", "starter_code", "test_cases"):
         if key not in part2:
             raise ValueError(f"part2_coding missing {key}.")
+    language = str(part2.get("language") or "").strip().lower()
+    if language not in {"javascript", "python"}:
+        raise ValueError("part2_coding.language must be javascript or python.")
+    function_name = str(part2.get("function_name") or "").strip()
+    if not function_name:
+        raise ValueError("part2_coding.function_name must be present.")
     tc = part2.get("test_cases")
     if not isinstance(tc, list) or len(tc) < 5:
         raise ValueError("part2_coding.test_cases must list at least 5 test cases.")
+    for index, case in enumerate(tc):
+        if not isinstance(case, dict):
+            raise ValueError(f"part2_coding.test_cases[{index}] must be an object.")
+        for key in ("name", "description", "input", "expected_output"):
+            if key not in case:
+                raise ValueError(f"part2_coding.test_cases[{index}] missing {key}.")
 
 
 def build_assessment_prompt(job: JobListing) -> str:
     skills = _skills_hint(job)
+    preferred_language = _preferred_coding_language(job)
     return f"""Generate a technical assessment for this role.
 
 Job title: {job.title}
@@ -149,12 +172,18 @@ Return a single JSON object with exactly this structure:
   ],
   "part2_coding": {{
     "title": "short title",
-    "language": "javascript|typescript|python",
+    "language": "javascript|python",
+    "function_name": "name of the main function the candidate must implement",
     "time_limit_minutes": 40,
     "instructions": "full problem statement including constraints",
     "starter_code": "plain code as a string (escape newlines as needed in JSON)",
     "test_cases": [
-      {{"name": "t1", "description": "what is asserted"}}
+      {{
+        "name": "t1",
+        "description": "what is asserted",
+        "input": "JSON-serializable function arguments. Use an array for positional arguments.",
+        "expected_output": "JSON-serializable expected return value"
+      }}
     ]
   }},
   "grading_notes": {{
@@ -168,9 +197,13 @@ Return a single JSON object with exactly this structure:
 
 Rules:
 - Exactly 10 MCQ items in part1_mcq, numbered id 1..10.
-- Questions must be specific to the stack listed above, not generic trivia.
+- Questions must be specific to the required stack and technical constraints in the job description, not generic trivia.
+- At least 7 of the 10 MCQs should directly target the required stack/skills listed above.
 - Each MCQ must have four distinct options and one correct letter.
-- part2_coding: one medium-difficulty problem appropriate to the role; include exactly 5 entries in test_cases describing checks (e.g. edge cases).
+- part2_coding: one medium-difficulty problem appropriate to the role; use {preferred_language} unless the role strongly implies the other allowed language.
+- The coding problem must reflect the role's real technical requirements and domain constraints.
+- Include exactly 5 entries in test_cases, each with executable input and expected_output values.
+- starter_code must define the named function in a runnable way for the chosen language.
 - Do not include markdown code fences inside JSON string values.
 """
 

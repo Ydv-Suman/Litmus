@@ -6,6 +6,7 @@ import re
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Iterable, Optional
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlparse
@@ -15,6 +16,14 @@ try:
     from groq import Groq
 except ImportError:  # pragma: no cover - depends on deployment environment
     Groq = None
+
+try:
+    from dotenv import load_dotenv
+except ImportError:  # pragma: no cover - depends on deployment environment
+    load_dotenv = None
+
+if load_dotenv is not None:
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 
 logger = logging.getLogger(__name__)
@@ -227,8 +236,18 @@ def analyze_github_profile(
         resume_data = None
 
     owner = _extract_owner_from_github_url(github_url)
-    user = _github_get(f"/users/{owner}")
-    repos = _fetch_repositories(owner)
+    try:
+        user = _github_get(f"/users/{owner}")
+        repos = _fetch_repositories(owner)
+    except GitHubAnalyserError as exc:
+        if "403" in str(exc):
+            return _github_forbidden_analysis(
+                owner=owner,
+                github_url=github_url,
+                resume_data=resume_data,
+                reason=str(exc),
+            )
+        raise
 
     if not repos:
         return _empty_analysis(owner, "No public repositories found for this GitHub profile.")
@@ -328,6 +347,49 @@ def _empty_analysis(owner: str, reason: str) -> dict[str, Any]:
             "frameworks": [],
             "repo_count_considered": 0,
             "recently_active_repositories": 0,
+        },
+    }
+
+
+def _github_forbidden_analysis(
+    *,
+    owner: str,
+    github_url: str,
+    resume_data: Optional[Any],
+    reason: str,
+) -> dict[str, Any]:
+    resume_profile = _extract_resume_profile(resume_data)
+    claimed_stack = sorted(resume_profile["all_claims"])
+    fallback_reason = (
+        "GitHub API access is currently forbidden or rate-limited, so repository evidence "
+        "could not be collected."
+    )
+    if reason:
+        fallback_reason = f"{fallback_reason} ({reason})"
+
+    return {
+        "github_url": github_url,
+        "owner": owner,
+        "name": owner,
+        "score": 0.0,
+        "points": 0.0,
+        "max_points": 40,
+        "criteria": {
+            "tech_stack_match": {"score": 0.0, "max": 15, "reason": fallback_reason},
+            "code_activity_consistency": {"score": 0.0, "max": 10, "reason": fallback_reason},
+            "project_quality_depth": {"score": 0.0, "max": 10, "reason": fallback_reason},
+            "collaboration_signals": {"score": 0.0, "max": 5, "reason": fallback_reason},
+        },
+        "signals": {
+            "primary_languages": [],
+            "frameworks": [],
+            "detected_skills": [],
+            "resume_claimed_skills": claimed_stack,
+            "matched_resume_skills": [],
+            "unverified_resume_skills": claimed_stack,
+            "repo_count_considered": 0,
+            "recently_active_repositories": 0,
+            "fetch_status": "forbidden",
         },
     }
 
